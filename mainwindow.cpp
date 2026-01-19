@@ -217,7 +217,8 @@ DetectResult MainWindow::detectDefect(
     double margin = 3.0,        // 百分位門檻再加/減一點 margin
     int minArea = 20,           // 最小汙點面積(像素)
     bool debug = false,
-    const std::string& debugPrefix = ""
+    const std::string& debugPrefix = "",
+    bool aorc = false
 ) {
     DetectResult out;
 
@@ -294,6 +295,15 @@ DetectResult MainWindow::detectDefect(
         cv::cvtColor(gray8, vis, cv::COLOR_GRAY2BGR);
         for (auto& r : boxes) cv::rectangle(vis, r, cv::Scalar(0,0,255), 2);
 
+        if(aorc) {
+            QImage imageA = ui->cameraPerview->cvMatToQImage(vis);
+            QPixmap pixmapA = QPixmap::fromImage(imageA);
+            ui->result1->setPixmap(pixmapA);
+        } else {
+            QImage imageC = ui->cameraPerview->cvMatToQImage(vis);
+            QPixmap pixmapC = QPixmap::fromImage(imageC);
+            ui->result2->setPixmap(pixmapC);
+        }
         cv::imshow("mask", mask);
         cv::imshow("brightMask", brightMask);
         cv::imshow("darkMask", darkMask);
@@ -410,6 +420,7 @@ void MainWindow::reset() {
     closeCamera();
     currentPath = "";
     currentStep = Step::Select_COM_Port;
+
 }
 
 // Scan UVC and Serial device
@@ -1096,7 +1107,7 @@ void MainWindow::handleReadyRead() {
             startInitDeviceState = false;
             currentStep = Step::Capture_30;
             createFolder();
-            loadBPCFile();
+            // loadBPCFile();
         }
     }
 
@@ -1869,12 +1880,12 @@ void MainWindow::setDataNUC(vector<int16_t> nuc_params, vector<int16_t> a_params
     cv::Mat matC(rows, cols, CV_16S, c_params.data());
     ui->cameraPerview->remapping16To8(matA);
     ui->cameraPerview->remapping16To8(matC);
-    QImage imageA = ui->cameraPerview->cvMatToQImage(matA);
-    QImage imageC = ui->cameraPerview->cvMatToQImage(matC);
-    QPixmap pixmapA = QPixmap::fromImage(imageA);
-    QPixmap pixmapC = QPixmap::fromImage(imageC);
-    ui->result1->setPixmap(pixmapA);
-    ui->result2->setPixmap(pixmapC);
+    // QImage imageA = ui->cameraPerview->cvMatToQImage(matA);
+    // QImage imageC = ui->cameraPerview->cvMatToQImage(matC);
+    // QPixmap pixmapA = QPixmap::fromImage(imageA);
+    // QPixmap pixmapC = QPixmap::fromImage(imageC);
+    // ui->result1->setPixmap(pixmapA);
+    // ui->result2->setPixmap(pixmapC);
 
     if(currentCalibraMode == CalibrationStep::NUC_2)
         currentCalibraMode = CalibrationStep::NUC_1;
@@ -1883,6 +1894,71 @@ void MainWindow::setDataNUC(vector<int16_t> nuc_params, vector<int16_t> a_params
     else if(currentCalibraMode == CalibrationStep::RADIOMETRY_2)
         currentCalibraMode = CalibrationStep::RADIOMETRY_1;
 
+    checkResultPass(matA, matC);
+}
+
+void MainWindow::checkResultPass(cv::Mat A, cv::Mat C) {
+
+    bool debug = true;
+    QString f = "p1.png";
+    int ok = 0, ng = 0;
+    cv::Mat img = cv::imread(f.toStdString(), cv::IMREAD_GRAYSCALE);
+    if (img.empty()) {
+        qDebug() << "Failed to read: " << f << "\n";
+    }
+    cv::imshow("og", img);
+    auto ra = detectDefect(
+        C,
+        /*border*/ 30,
+        /*bgSigma*/ 10.0,
+        /*hiPct*/ 0.999,
+        /*loPct*/ 0.001,
+        /*margin*/ 1.0,
+        /*minArea*/ 20,
+        /*debug*/ debug,
+        /*debugPrefix*/ "test",
+        true
+        );
+
+    qDebug() << f.toStdString()
+             << " => " << (ra.hasDefect ? "DEFECT" : "CLEAN")
+             << " (components=" << ra.componentCount
+             << ", brightThr=" << ra.brightThr
+             << ", darkThr=" << ra.darkThr
+             << ")\n";
+
+    if (ra.hasDefect) ng++; else ok++;
+
+
+    auto r = detectDefect(
+        A,
+        /*border*/ 30,
+        /*bgSigma*/ 10.0,
+        /*hiPct*/ 0.999,
+        /*loPct*/ 0.001,
+        /*margin*/ 1.0,
+        /*minArea*/ 20,
+        /*debug*/ debug,
+        /*debugPrefix*/ "test",
+        false
+        );
+
+    qDebug() << f.toStdString()
+             << " => " << (r.hasDefect ? "DEFECT" : "CLEAN")
+             << " (components=" << r.componentCount
+             << ", brightThr=" << r.brightThr
+             << ", darkThr=" << r.darkThr
+             << ")\n";
+
+    if (r.hasDefect) ng++; else ok++;
+
+    if(ng == 0) {
+        ui->labelPass->setText("PASS");
+        ui->labelPass->setStyleSheet("color: green;");
+    } else {
+        ui->labelPass->setText("FAIL");
+        ui->labelPass->setStyleSheet("color: red;");
+    }
     currentStep = Step::Finish;
 }
 

@@ -112,10 +112,11 @@ public:
     // calibration - calculate
     void calculateParmeterNUC();
     void setDataNUC(vector<int16_t> nuc_params, vector<int16_t> a_params, vector<int16_t> c_params);
+    void checkResultPass(cv::Mat A, cv::Mat C);
 
     void reset();
 
-    DetectResult detectDefect(const cv::Mat& gray8, int border,double bgSigma, double hiPct, double loPct, double margin, int minArea, bool debug, const std::string& debugPrefix);
+    DetectResult detectDefect(const cv::Mat& gray8, int border,double bgSigma, double hiPct, double loPct, double margin, int minArea, bool debug, const std::string& debugPrefix, bool aorc);
     void test();
     void loadBPCFile();
     bool isImageFile(QString p);
