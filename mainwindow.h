@@ -113,6 +113,13 @@ public:
     void calculateParmeterNUC();
     void setDataNUC(vector<int16_t> nuc_params, vector<int16_t> a_params, vector<int16_t> c_params);
     void checkResultPass(cv::Mat A, cv::Mat C);
+    void autoAdjustNUC();
+
+    // utility
+    vector<pair<int, int>> find_consecutive_zeros(const vector<int32_t>& data_list, int zero_threshold);
+    pair<int, int> find_left_and_right_neighbors(const vector<pair<int, int>>& zero_blocks_results, int target_index, int data_list_length);
+    pair<int, int> find_neighbors_for_target(const vector<int32_t>& data_list, int zero_threshold, int target_index);
+
 
     void reset();
 

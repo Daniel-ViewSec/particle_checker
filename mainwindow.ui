@@ -166,7 +166,52 @@ QScrollBar::sub-page:horizontal {
     </item>
     <item>
      <widget class="QWidget" name="captureWidget" native="true">
-      <layout class="QVBoxLayout" name="verticalLayout_2" stretch="8,1,1">
+      <layout class="QVBoxLayout" name="verticalLayout_2" stretch="1,8,1,1">
+       <item>
+        <layout class="QHBoxLayout" name="horizontalLayout_4">
+         <item>
+          <spacer name="horizontalSpacer">
+           <property name="orientation">
+            <enum>Qt::Orientation::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btnAuto">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="styleSheet">
+            <string notr="true">QPushButton { 
+	background-color: none;
+	border: none; 
+	image: url(:/icon_autorun.png);
+	width:40px;
+	color: rgb(184, 180, 179);
+	height:40px;
+	outline: none;
+}
+QPushButton:pressed { 
+	background-color: rgb(105, 100, 99);;
+	border-radius: 25px;
+}</string>
+           </property>
+           <property name="text">
+            <string/>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
        <item>
         <widget class="cameraImageWidget" name="cameraPerview" native="true"/>
        </item>

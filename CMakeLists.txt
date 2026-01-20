@@ -43,6 +43,12 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         cameraimagewidget.cpp
         CalibrationStep.h
     )
+  qt_add_resources(particle_checker "image"
+    PREFIX "/"
+    FILES
+    icon_autorun.png
+  )
+
 # Define target properties for Android with Qt 6 as:
 #    set_property(TARGET particle_checker APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
 #                 ${CMAKE_CURRENT_SOURCE_DIR}/android)

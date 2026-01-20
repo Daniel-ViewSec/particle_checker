@@ -51,6 +51,10 @@ std::vector<int16_t> permuteNUC;
 QString styleUncalculate = "border-radius: 12px;border:2px solid #737574;";
 QString styleCalculated = "border-radius: 12px;border:2px solid #2ec96f;";
 
+// auto GSK
+int THERMAL_MAX_VALUE =16383, ZERO_THRESHOLD = 25, BOUNDARY_BUFFER =1500, xorCount = 0;
+bool autoProcessing = false, zoomHigh = false, zoomLow = false;
+
 // NUC Folder structure definition
 int selectHighLow = -1;
 QMap<QString, QList<QString>> gainFolders = {
@@ -92,6 +96,12 @@ MainWindow::MainWindow(QWidget *parent)
         }
     });
     connect(ui->btnFinish, &QPushButton::clicked, this, &MainWindow::reset);
+    connect(ui->btnAuto, &QPushButton::clicked, this, [this](){
+        autoProcessing = true;
+        zoomHigh= false;
+        zoomLow= false;
+        autoAdjustNUC();
+    });
 
     // nuc bpc
     connect(nuccla, &NUC_Data::send_nuc, this, &MainWindow::setDataNUC);
@@ -304,14 +314,14 @@ DetectResult MainWindow::detectDefect(
             QPixmap pixmapC = QPixmap::fromImage(imageC);
             ui->result2->setPixmap(pixmapC);
         }
-        cv::imshow("mask", mask);
-        cv::imshow("brightMask", brightMask);
-        cv::imshow("darkMask", darkMask);
-        cv::imshow("vis", vis);
-        cv::imwrite("./" + debugPrefix + "_mask.png", mask);
-        cv::imwrite("./" + debugPrefix + "_bright.png", brightMask);
-        cv::imwrite("./" + debugPrefix + "_dark.png", darkMask);
-        cv::imwrite("./" + debugPrefix + "_boxes.png", vis);
+        // cv::imshow("mask", mask);
+        // cv::imshow("brightMask", brightMask);
+        // cv::imshow("darkMask", darkMask);
+        // cv::imshow("vis", vis);
+        // cv::imwrite("./" + debugPrefix + "_mask.png", mask);
+        // cv::imwrite("./" + debugPrefix + "_bright.png", brightMask);
+        // cv::imwrite("./" + debugPrefix + "_dark.png", darkMask);
+        // cv::imwrite("./" + debugPrefix + "_boxes.png", vis);
     }
 
     return out;
@@ -800,6 +810,9 @@ void MainWindow::handleReadyRead() {
                     qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
                              << "Value:" << value16;
                     deviceState->sensorDacGsk = value16;
+                }
+                if(autoProcessing) {
+                    autoAdjustNUC();
                 }
                 break;
             case SerialEvent::GET_CINT:
@@ -1900,13 +1913,7 @@ void MainWindow::setDataNUC(vector<int16_t> nuc_params, vector<int16_t> a_params
 void MainWindow::checkResultPass(cv::Mat A, cv::Mat C) {
 
     bool debug = true;
-    QString f = "p1.png";
     int ok = 0, ng = 0;
-    cv::Mat img = cv::imread(f.toStdString(), cv::IMREAD_GRAYSCALE);
-    if (img.empty()) {
-        qDebug() << "Failed to read: " << f << "\n";
-    }
-    cv::imshow("og", img);
     auto ra = detectDefect(
         C,
         /*border*/ 30,
@@ -1962,3 +1969,212 @@ void MainWindow::checkResultPass(cv::Mat A, cv::Mat C) {
     currentStep = Step::Finish;
 }
 
+void MainWindow::autoAdjustNUC() {
+    // --- Step 0: convert image to CV_64F for processing ---
+    vector<cv::Point> outlier_coords;
+
+    cv::Mat img = ui->cameraPerview->getCaptureImageNUC();
+    cv::Mat src;
+    std::vector<int32_t> hist(THERMAL_MAX_VALUE + 1, 0);
+    if (img.type() == CV_16U) {
+        src = img;
+    } else {
+        img.convertTo(src, CV_16U);
+    }
+
+    const int rows = src.rows;
+    const int cols = src.cols;
+    int count_total = 0;
+
+    // Iterate pixel-by-pixel
+    if (src.type() == CV_16U) {
+
+        for (int r = 0; r < rows; ++r) {
+            const uint16_t* rowPtr = src.ptr<uint16_t>(r);
+
+            for (int c = 0; c < cols; ++c) {
+                uint16_t v = rowPtr[c];
+                count_total++;
+                hist[v]++;
+                // if (v < THERMAL_MAX_VALUE + 1) {
+                //     hist[v]++;
+                // } else {
+                //     qDebug() << " out of range -  " << v;
+                // }
+            }
+        }
+    }
+
+    int medianIdex = 0;
+    int total = 0;
+    for (int32_t i = 0; i < hist.size(); i++) {
+        total += hist[i];
+        if(total > (rows*cols/2)) {
+            medianIdex = i;
+            break;
+        }
+    }
+
+    int middle_hist = THERMAL_MAX_VALUE/2; // target
+    int left_target = BOUNDARY_BUFFER;
+    int right_target = THERMAL_MAX_VALUE -BOUNDARY_BUFFER;
+    double adjustValue = 0;
+
+    pair<int, int> boundary = find_neighbors_for_target(hist, ZERO_THRESHOLD, medianIdex);
+
+    //left
+    // adjustValue = ((double)(boundary.first - left_target) / middle_hist * 3.0) + 0.5;
+    // qDebug() << "medianIdex: " << medianIdex << " ,Left: " << boundary.first << " ,right: " << boundary.second;
+    // qDebug() << "left_target: " << left_target ;
+    // qDebug() << " ,middle_hist: " << middle_hist << " ,adjustValue: " << adjustValue;
+
+    // middle
+    adjustValue = ((double)(medianIdex - middle_hist) / middle_hist * 5.0) + 0.5;
+    qDebug() << "medianIdex: " << medianIdex << " ,Left: " << boundary.first << " ,right: " << boundary.second;
+    qDebug() << " ,middle_hist: " << middle_hist << " ,adjustValue: " << adjustValue;
+
+    // // right
+    // adjustValue = ((double)(boundary.second - right_target) / middle_hist * 3.0) + 0.5;
+    // qDebug() << "medianIdex: " << medianIdex << " ,Left: " << boundary.first << " ,right: " << boundary.second;
+    // qDebug() << "right_target: " << right_target ;
+    // qDebug() << "middle_hist: " << middle_hist << " ,adjustValue: " << adjustValue;
+
+
+    bool direactFlag = adjustValue < 0;
+
+    if(abs(adjustValue) < 1) {
+        if(direactFlag) {
+            zoomHigh = true;
+            adjustValue = -1;
+        } else {
+            zoomLow= true;
+            adjustValue = 1;
+        }
+    }
+
+    if(abs(adjustValue) > 5) {
+        if(direactFlag) {
+            adjustValue = -5;
+        } else {
+            adjustValue = 5;
+        }
+    }
+
+    if(zoomHigh && zoomLow) {
+        autoProcessing = false;
+        qDebug() << "Auto Processing end";
+    }
+
+    if(autoProcessing) {
+        // continue
+        deviceUpdate->sensorDacGsk = deviceState->sensorDacGsk - (int)adjustValue;
+        qDebug() << "deviceUpdate->sensorDacGsk: " << deviceUpdate->sensorDacGsk << " ,deviceState->sensorDacGsk: " << deviceState->sensorDacGsk;
+
+        eventSend->append(SerialEvent::SET_DGSK);
+        eventSend->append(SerialEvent::GET_DGSK);
+
+
+    } else {
+        // end of adjust
+        QMessageBox msgBox;
+        msgBox.setText("Auto adjust end!!");
+        msgBox.exec();
+    }
+}
+
+// utility
+vector<pair<int, int>> MainWindow::find_consecutive_zeros(const vector<int32_t>& data_list, int zero_threshold) {
+
+    if (zero_threshold <= 0) {
+        return {};
+    }
+
+    vector<pair<int, int>> results;
+    int consecutive_count = 0;
+    int start_index = -1;
+
+    for (int i = 0; i < data_list.size(); ++i) {
+        if (data_list[i] == 0) {
+            // Start a new sequence or continue an existing one
+            if (consecutive_count == 0) {
+                start_index = i;
+            }
+            consecutive_count++;
+        } else {
+            // A non-zero item breaks the sequence
+            if (consecutive_count >= zero_threshold) {
+                // Store the result: end index is i - 1 (inclusive)
+                results.push_back({start_index, i - 1});
+            }
+
+            // Reset the count and start index
+            consecutive_count = 0;
+            start_index = -1;
+        }
+    }
+
+    // Check for a sequence that ends at the end of the list
+    if (consecutive_count >= zero_threshold) {
+        results.push_back({start_index, (int)data_list.size() - 1});
+    }
+
+    return results;
+}
+
+pair<int, int> MainWindow::find_left_and_right_neighbors(const vector<pair<int, int>>& zero_blocks_results, int target_index, int data_list_length) {
+
+    // qDebug() << "zero block :";
+
+    // 1. Check if the target index is INSIDE a zero block
+    for (const auto& block : zero_blocks_results) {
+        // qDebug() << block;
+        if (block.first <= target_index && target_index <= block.second) {
+            // Target index is part of a consecutive zero block
+            return {0, target_index};
+        }
+    }
+
+    // 2. Check the gaps BETWEEN zero blocks
+
+    // Create a vector of boundary markers to define the gaps.
+    // The boundaries are: (Previous block end, Next block start)
+
+    // Add the boundary for the gap before the first block: (-1, start of first block)
+    int prev_end = -1;
+
+    for (const auto& block : zero_blocks_results) {
+        int next_start = block.first;
+
+        // If there is a gap, check the target index
+        if (prev_end < next_start) {
+            // The gap is (prev_end, next_start)
+            if (prev_end < target_index && target_index < next_start) {
+                // Target index is in this gap. Neighbors are the boundary indices.
+                return {prev_end, next_start};
+            }
+        }
+        // Update the end of the previous block for the next iteration
+        prev_end = block.second;
+    }
+
+    // Check the gap after the last block: (end of last block, data_list_length)
+    if (prev_end < data_list_length) {
+        if (prev_end < target_index && target_index < data_list_length) {
+            // Target index is in the final gap.
+            return {prev_end, data_list_length};
+        }
+    }
+
+    // If the index is not found in any gap, it's outside the list boundaries
+    // or an unexpected edge case not covered above.
+    return {0, target_index};
+}
+
+pair<int, int> MainWindow::find_neighbors_for_target(const vector<int32_t>& data_list, int zero_threshold, int target_index) {
+
+    // 1. Find all consecutive zero blocks based on the threshold
+    vector<pair<int, int>> zero_blocks = find_consecutive_zeros(data_list, zero_threshold);
+
+    // 2. Find the left and right neighbors using the results from step 1
+    return find_left_and_right_neighbors(zero_blocks, target_index, data_list.size());
+}
