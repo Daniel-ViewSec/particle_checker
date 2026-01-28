@@ -15,6 +15,7 @@ public:
     quint16 sensorCint;         //uint8
     quint16 sensorTint;
     QString deviceNameSN;
+    bool productionMode;
 
     // blue zone
     bool noiseReduction;        //uint8

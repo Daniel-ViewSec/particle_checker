@@ -147,6 +147,7 @@ private:
     QQueue<SerialEvent> *eventRead;
     QQueue<SerialEvent> *eventSend;
     bool startInitDeviceState = false;
+    QByteArray poolBuffer;
     QBuffer modeTempBuffer;
     unordered_map<string, SourceVideoMode> sourceVideoModeFormatMap = {
        {"UJPG", SourceVideoMode::UJPG},

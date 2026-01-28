@@ -27,6 +27,7 @@ enum class SerialEvent {
         GET_GAIN,
         GET_TPCC,
         GET_MSNO,
+        GET_PMOD,
 
         //set
         SET_3DNR,
@@ -48,6 +49,7 @@ enum class SerialEvent {
         SET_COLM,
         SET_FFCS,
         SET_TPCC,
+        SET_PMOD,
 };
 
 #endif // SERIALEVENT_H

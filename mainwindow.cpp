@@ -364,7 +364,7 @@ void MainWindow::test() {
     if (img.empty()) {
         qDebug() << "Failed to read: " << f << "\n";
     }
-    cv::imshow("og", img);
+    // cv::imshow("og", img);
     // 你可以依你的資料再調參數
     // auto r = detectDefect(
     //     img,
@@ -426,6 +426,7 @@ void MainWindow::createFolder() {
 }
 
 void MainWindow::reset() {
+    currentDataNUC = DataNUC();
     closeSerial();
     closeCamera();
     currentPath = "";
@@ -651,461 +652,551 @@ void MainWindow::handleReadyRead() {
     QByteArray buffer;
     quint32 value32;
     quint16 value16;
+    quint16 length;
     int unitSize;
     std::string asciiValue;
 
-    buffer.append(serial->readAll());
+    poolBuffer.append(serial->readAll());
     //qDebug() << "data input size:" << buffer.size();
 
     if(eventRead->size() > 0){
 
         SerialEvent readEvent = eventRead->first();
-        if(buffer.size() == 4 && (QString(buffer.data()) == "FAIL" )) {
-            qDebug() << "failed Event:" << QString::number((int)readEvent) <<",  buffer data:"<< QString(buffer.data()) <<", please try again. :(";
-            // eventRead->clear();
-        } else {
-            switch (readEvent) {
-            case SerialEvent::GET_SERIAL_NUMBER:
-
-                qDebug() << "get read: GET_SERIAL_NUMBER";
-                unitSize = 4;
-
-                if(buffer.size() >= unitSize) {
-                    QByteArray unit = buffer.left(unitSize);
-                    buffer.remove(0, unitSize);
-
-                    // Process the unit
-                    // Combine bytes: first byte is low, second byte is high
-                    memcpy(&value32, unit, 4);
-                    // value32 = static_cast<quint32>(unit[3]) | (static_cast<quint32>(unit[2]) << 8)| (static_cast<quint32>(unit[1]) << 16)| (static_cast<quint32>(unit[0]) << 24);
-
-                    qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
-                             << "Value:" << value32;
-
-                    deviceState->serialNumber = value32;
-                }
-                break;
-            case SerialEvent::GET_VER1:
-                qDebug() << "get read: GET_VER1";
-                asciiValue = buffer.data();
-                qDebug() << asciiValue;
-                deviceState->fwVersion = QString::fromStdString(asciiValue);
-                break;
-            case SerialEvent::GET_VER2:
-                qDebug() << "get read: GET_VER2";
-                asciiValue = buffer.data();
-                qDebug() << asciiValue;
-                deviceState->companyName = QString::fromStdString(asciiValue);
-                break;
-            case SerialEvent::GET_3DNR:
-                qDebug() << "get read: GET_3DNR";
+        if(readEvent == SerialEvent::GET_PMOD) {
+            int index = poolBuffer.indexOf("\x55\xAA");
+            if (index == -1) {
+                // old format
                 unitSize = 1;
 
-                if(buffer.size() >= unitSize) {
-                    QByteArray unit = buffer.left(unitSize);
-                    buffer.remove(0, unitSize);
+                if(poolBuffer.size() >= unitSize) {
+                    QByteArray unit = poolBuffer.left(unitSize);
+                    poolBuffer.remove(0, unitSize);
 
                     // Process the unit
                     // Combine bytes: first byte is low, second byte is high
                     value16 = static_cast<quint8>(unit[0]);
 
-                    qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
-                             << "Value:" << value16;
-                    deviceState->noiseReduction = value16 > 0;
+                    //qDebug() << "Thermal Device:" << "Thermal Device:" << "Received "<< unitSize << "-byte unit:" << unit.toHex() << "Value:" << value16;
+                    deviceState->productionMode = value16 > 0;
                 }
-                break;
-            case SerialEvent::GET_NUCC:
-                qDebug() << "get read: GET_NUCC";
-                unitSize = 1;
-
-                if(buffer.size() >= unitSize) {
-                    QByteArray unit = buffer.left(unitSize);
-                    buffer.remove(0, unitSize);
-
-                    // Process the unit
-                    // Combine bytes: first byte is low, second byte is high
-                    value16 = static_cast<quint8>(unit[0]);
-
-                    qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
-                             << "Value:" << value16;
-                    deviceState->nucControl = value16 > 0;
+            } else {
+                // new format
+                // check buffer size
+                if(index + 4 > poolBuffer.size()) {
+                    return;
                 }
-                break;
-            case SerialEvent::GET_BPCC:
-                qDebug() << "get read: GET_BPCC";
-                unitSize = 1;
 
-                if(buffer.size() >= unitSize) {
-                    QByteArray unit = buffer.left(unitSize);
-                    buffer.remove(0, unitSize);
-
-                    // Process the unit
-                    // Combine bytes: first byte is low, second byte is high
-                    value16 = static_cast<quint8>(unit[0]);
-
-                    qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
-                             << "Value:" << value16;
-                    deviceState->bpcControl = value16 > 0;
-                }
-                break;
-            case SerialEvent::GET_VTMP:
-                // qDebug() << "get read: GET_VTMP";
+                // read data length
                 unitSize = 2;
-                // To Do : check buffer size > event req
-                if(buffer.size() >= unitSize) {
-                    QByteArray unit = buffer.left(unitSize);
-                    buffer.remove(0, unitSize);
+                if(index + 4 < poolBuffer.size()) {
+                    QByteArray unit = poolBuffer.mid(index + 2, unitSize);
 
                     // Process the unit
                     // Combine bytes: first byte is low, second byte is high
-                    value16 = static_cast<quint8>(unit[0]) | (static_cast<quint8>(unit[1]) << 8);
-
-                    deviceState->sensorVTEMP = value16;
-                } else {
-                    qDebug() << "drop wrong response GET_VTMP";
+                    length = static_cast<quint8>(unit[0]) | (static_cast<quint8>(unit[1]) << 8);
                 }
 
-                if(captureMode == 4) {
-                    if(currentCalibraMode == CalibrationStep::CAP_2) {
-                        // next step
-                        if (!captureRawSetting && !captureShutterSetting)
-                            currentCalibraMode = CalibrationStep::CAP_5; // skip both captures
-                        else if (captureRawSetting)
-                            currentCalibraMode = CalibrationStep::CAP_3; // do open capture
+                // check data size
+                if(index + 4 + length + 2 > poolBuffer.size()) {
+                    return;
+                }
+
+                // read data
+                unitSize = length;
+                QByteArray unit = poolBuffer.mid(index + 4, unitSize);
+
+                // Process the unit
+                // Combine bytes: first byte is low, second byte is high
+                value16 = static_cast<quint8>(unit[0]);
+                deviceState->productionMode = value16 > 0;
+            }
+
+            // read end remove event
+            if(!eventRead->isEmpty()) {
+                eventRead->pop_front();
+                poolBuffer.clear();
+            }
+        } else {
+            // read event
+
+            if(deviceState->productionMode == 1) {
+                int index = poolBuffer.indexOf("\x55\xAA");
+                if(index + 4 > poolBuffer.size()) {
+                    return;
+                }
+
+                // read data length
+                unitSize = 2;
+                if(index + 4 < poolBuffer.size()) {
+                    QByteArray unit = poolBuffer.mid(index + 2, unitSize);
+
+                    // Process the unit
+                    // Combine bytes: first byte is low, second byte is high
+                    length = static_cast<quint8>(unit[0]) | (static_cast<quint8>(unit[1]) << 8);
+                }
+
+                // check data size
+                if(index + 4 + length + 2 > poolBuffer.size()) {
+                    return;
+                }
+
+                // read data
+                unitSize = length;
+                buffer = poolBuffer.mid(index + 4, unitSize);
+            } else if(deviceState->productionMode == 0) {
+                buffer = poolBuffer;
+            }
+
+            if(buffer.size() == 4 && (QString(buffer.data()) == "FAIL" )) {
+                qDebug() << "failed Event:" << QString::number((int)readEvent) <<",  buffer data:"<< QString(buffer.data()) <<", please try again. :(";
+                // eventRead->clear();
+            } else {
+                switch (readEvent) {
+                case SerialEvent::GET_SERIAL_NUMBER:
+
+                    qDebug() << "get read: GET_SERIAL_NUMBER";
+                    unitSize = 4;
+
+                    if(buffer.size() >= unitSize) {
+                        QByteArray unit = buffer.left(unitSize);
+                        buffer.remove(0, unitSize);
+
+                        // Process the unit
+                        // Combine bytes: first byte is low, second byte is high
+                        memcpy(&value32, unit, 4);
+                        // value32 = static_cast<quint32>(unit[3]) | (static_cast<quint32>(unit[2]) << 8)| (static_cast<quint32>(unit[1]) << 16)| (static_cast<quint32>(unit[0]) << 24);
+
+                        qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
+                                 << "Value:" << value32;
+
+                        deviceState->serialNumber = value32;
+                    }
+                    break;
+                case SerialEvent::GET_VER1:
+                    qDebug() << "get read: GET_VER1";
+                    asciiValue = buffer.data();
+                    qDebug() << asciiValue;
+                    deviceState->fwVersion = QString::fromStdString(asciiValue);
+                    break;
+                case SerialEvent::GET_VER2:
+                    qDebug() << "get read: GET_VER2";
+                    asciiValue = buffer.data();
+                    qDebug() << asciiValue;
+                    deviceState->companyName = QString::fromStdString(asciiValue);
+                    break;
+                case SerialEvent::GET_3DNR:
+                    qDebug() << "get read: GET_3DNR";
+                    unitSize = 1;
+
+                    if(buffer.size() >= unitSize) {
+                        QByteArray unit = buffer.left(unitSize);
+                        buffer.remove(0, unitSize);
+
+                        // Process the unit
+                        // Combine bytes: first byte is low, second byte is high
+                        value16 = static_cast<quint8>(unit[0]);
+
+                        qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
+                                 << "Value:" << value16;
+                        deviceState->noiseReduction = value16 > 0;
+                    }
+                    break;
+                case SerialEvent::GET_NUCC:
+                    qDebug() << "get read: GET_NUCC";
+                    unitSize = 1;
+
+                    if(buffer.size() >= unitSize) {
+                        QByteArray unit = buffer.left(unitSize);
+                        buffer.remove(0, unitSize);
+
+                        // Process the unit
+                        // Combine bytes: first byte is low, second byte is high
+                        value16 = static_cast<quint8>(unit[0]);
+
+                        qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
+                                 << "Value:" << value16;
+                        deviceState->nucControl = value16 > 0;
+                    }
+                    break;
+                case SerialEvent::GET_BPCC:
+                    qDebug() << "get read: GET_BPCC";
+                    unitSize = 1;
+
+                    if(buffer.size() >= unitSize) {
+                        QByteArray unit = buffer.left(unitSize);
+                        buffer.remove(0, unitSize);
+
+                        // Process the unit
+                        // Combine bytes: first byte is low, second byte is high
+                        value16 = static_cast<quint8>(unit[0]);
+
+                        qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
+                                 << "Value:" << value16;
+                        deviceState->bpcControl = value16 > 0;
+                    }
+                    break;
+                case SerialEvent::GET_VTMP:
+                    // qDebug() << "get read: GET_VTMP";
+                    unitSize = 2;
+                    // To Do : check buffer size > event req
+                    if(buffer.size() >= unitSize) {
+                        QByteArray unit = buffer.left(unitSize);
+                        buffer.remove(0, unitSize);
+
+                        // Process the unit
+                        // Combine bytes: first byte is low, second byte is high
+                        value16 = static_cast<quint8>(unit[0]) | (static_cast<quint8>(unit[1]) << 8);
+
+                        deviceState->sensorVTEMP = value16;
+                    } else {
+                        qDebug() << "drop wrong response GET_VTMP";
+                    }
+
+                    if(captureMode == 4) {
+                        if(currentCalibraMode == CalibrationStep::CAP_2) {
+                            // next step
+                            if (!captureRawSetting && !captureShutterSetting)
+                                currentCalibraMode = CalibrationStep::CAP_5; // skip both captures
+                            else if (captureRawSetting)
+                                currentCalibraMode = CalibrationStep::CAP_3; // do open capture
+                            else
+                                currentCalibraMode = CalibrationStep::CAP_4;
+                            checkCaptureFlag();
+                        }
+                    }
+                    break;
+                case SerialEvent::GET_DGFD:
+                    qDebug() << "get read: GET_DGFD";
+                    unitSize = 2;
+
+                    if(buffer.size() >= unitSize) {
+                        QByteArray unit = buffer.left(unitSize);
+                        buffer.remove(0, unitSize);
+
+                        // Process the unit
+                        // Combine bytes: first byte is low, second byte is high
+                        value16 = static_cast<quint8>(unit[0]) | (static_cast<quint8>(unit[1]) << 8);
+
+                        qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
+                                 << "Value:" << value16;
+                        deviceState->sensorDacGfid = value16;
+                    }
+                    break;
+                case SerialEvent::GET_DGSK:
+                    qDebug() << "get read: GET_DGSK";
+                    unitSize = 2;
+
+                    if(buffer.size() >= unitSize) {
+                        QByteArray unit = buffer.left(unitSize);
+                        buffer.remove(0, unitSize);
+
+                        // Process the unit
+                        // Combine bytes: first byte is low, second byte is high
+                        value16 = static_cast<quint8>(unit[0]) | (static_cast<quint8>(unit[1]) << 8);
+
+                        qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
+                                 << "Value:" << value16;
+                        deviceState->sensorDacGsk = value16;
+                    }
+                    if(autoProcessing) {
+                        autoAdjustNUC();
+                    }
+                    break;
+                case SerialEvent::GET_CINT:
+                    qDebug() << "get read: GET_CINT";
+                    unitSize = 1;
+
+                    if(buffer.size() >= unitSize) {
+                        QByteArray unit = buffer.left(unitSize);
+                        buffer.remove(0, unitSize);
+
+                        // Process the unit
+                        // Combine bytes: first byte is low, second byte is high
+                        value16 = static_cast<quint8>(unit[0]);
+
+                        qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
+                                 << "Value:" << value16;
+                        deviceState->sensorCint = value16;
+                    }
+                    break;
+                case SerialEvent::GET_TINT:
+                    qDebug() << "get read: GET_TINT";
+                    unitSize = 2;
+
+                    if(buffer.size() >= unitSize) {
+                        QByteArray unit = buffer.left(unitSize);
+                        buffer.remove(0, unitSize);
+
+                        // Process the unit
+                        // Combine bytes: first byte is low, second byte is high
+                        value16 = static_cast<quint8>(unit[0]) | (static_cast<quint8>(unit[1]) << 8);
+
+                        qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
+                                 << "Value:" << value16;
+                        deviceState->sensorTint = value16;
+                    }
+                    break;
+                case SerialEvent::GET_DDEC:
+                    qDebug() << "get read: GET_DDEC";
+                    unitSize = 1;
+
+                    if(buffer.size() >= unitSize) {
+                        QByteArray unit = buffer.left(unitSize);
+                        buffer.remove(0, unitSize);
+
+                        // Process the unit
+                        // Combine bytes: first byte is low, second byte is high
+                        value16 = static_cast<quint8>(unit[0]);
+
+                        qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
+                                 << "Value:" << value16;
+                        deviceState->ddeControl = value16 > 0;
+                    }
+                    break;
+                case SerialEvent::GET_VOMC:
+                    qDebug() << "get read: GET_VOMC";
+                    if( modeTempBuffer.size() + buffer.size() < 4) {
+                        qDebug() << "not enough data: "<< buffer.data();
+                        modeTempBuffer.setData(buffer);
+                        return;
+                    }
+                    asciiValue = modeTempBuffer.data() + buffer.data();
+                    modeTempBuffer.buffer().clear();
+                    qDebug() << asciiValue;
+                    deviceState->sourceMode = QString::fromStdString(asciiValue);
+                    updateCameraSource(QString::fromStdString(asciiValue));
+                    break;
+                case SerialEvent::GET_SUTS:
+                    qDebug() << "get read: GET_SUTS";
+                    unitSize = 1;
+
+                    if(buffer.size() >= unitSize) {
+                        QByteArray unit = buffer.left(unitSize);
+                        buffer.remove(0, unitSize);
+
+                        // Process the unit
+                        // Combine bytes: first byte is low, second byte is high
+                        value16 = static_cast<quint8>(unit[0]);
+
+                        qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
+                                 << "Value:" << value16;
+                        deviceState->shutterControl= value16 > 0;
+                    }
+                    break;
+                case SerialEvent::GET_SUTC:
+                    qDebug() << "get read: GET_SUTC";
+                    unitSize = 1;
+
+                    if(buffer.size() >= unitSize) {
+                        QByteArray unit = buffer.left(unitSize);
+                        buffer.remove(0, unitSize);
+
+                        // Process the unit
+                        // Combine bytes: first byte is low, second byte is high
+                        value16 = static_cast<quint8>(unit[0]);
+
+                        qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
+                                 << "Value:" << value16;
+                        deviceState->autoShutterControl  = value16 > 0;
+                    }
+                    break;
+                case SerialEvent::GET_AGCM:
+                    qDebug() << "get read: GET_AGCM";
+                    unitSize = 2;
+
+                    if(buffer.size() >= unitSize) {
+                        QByteArray unit = buffer.left(unitSize);
+                        buffer.remove(0, unitSize);
+
+                        // Process the unit
+                        // Combine bytes: first byte is low, second byte is high
+                        value16 = static_cast<quint8>(unit[0]) | (static_cast<quint8>(unit[1]) << 8);
+
+                        qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
+                                 << "Value:" << value16;
+                        // check data in range
+                        if(value16 < 2)
+                            deviceState->agcMode = value16;
                         else
-                            currentCalibraMode = CalibrationStep::CAP_4;
+                            qDebug() << "get agc error, please try again. :(" ;
+                    }
+                    break;
+                case SerialEvent::GET_GAIN:
+                    qDebug() << "get read: GET_GAIN";
+                    unitSize = 1;
+
+                    if(buffer.size() >= unitSize) {
+                        QByteArray unit = buffer.left(unitSize);
+                        buffer.remove(0, unitSize);
+
+                        // Process the unit
+                        // Combine bytes: first byte is low, second byte is high
+                        value16 = static_cast<quint8>(unit[0]);
+
+                        qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
+                                 << "Value:" << value16;
+                        // check data in range
+                        if(value16 < 4)
+                            deviceState->gainMode = value16;
+                        else
+                            qDebug() << "get gain error, please try again. :(";
+                    }
+                    break;
+                case SerialEvent::GET_MSNO:
+                    qDebug() << "get read: GET_MSNO";
+                    if( modeTempBuffer.size() + buffer.size() < 15) {
+                        qDebug() << "Thermal Device:" << "not enough data";
+                        modeTempBuffer.setData(buffer);
+                        eventRead->prepend(SerialEvent::GET_MSNO);
+                        return;
+                    }
+                    asciiValue = modeTempBuffer.data() + buffer.data();
+                    modeTempBuffer.buffer().clear();
+                    qDebug() << asciiValue;
+                    deviceState->deviceNameSN = QString::fromStdString(asciiValue);
+                    break;
+                case SerialEvent::SET_3DNR:
+                    qDebug() << "get read: SET_3DNR";
+                    qDebug() << buffer.data();
+
+                    break;
+                case SerialEvent::SET_NUCC:
+                    qDebug() << "get read: SET_NUCC";
+                    qDebug() << buffer.data();
+
+                    break;
+                case SerialEvent::SET_BPCC:
+                    qDebug() << "get read: SET_BPCC";
+                    qDebug() << buffer.data();
+
+                    break;
+                case SerialEvent::SET_DGFD:
+                    qDebug() << "get read: SET_DGFD";
+                    qDebug() << buffer.data();
+
+                    break;
+                case SerialEvent::SET_DGSK:
+                    qDebug() << "get read: SET_DGSK";
+                    qDebug() << buffer.data();
+
+                    break;
+                case SerialEvent::SET_CINT:
+                    qDebug() << "get read: SET_CINT";
+                    qDebug() << buffer.data();
+
+                    break;
+                case SerialEvent::SET_TINT:
+                    qDebug() << "get read: SET_TINT";
+                    qDebug() << buffer.data();
+
+                    break;
+                case SerialEvent::SET_VOMC:
+                    qDebug() << "get read: SET_VOMC";
+                    qDebug() << buffer.data();
+                    if( modeTempBuffer.size() + buffer.size() < 4) {
+                        qDebug() << "not enough data";
+                        modeTempBuffer.setData(buffer);
+                        return;
+                    }
+                    asciiValue = modeTempBuffer.data() + buffer.data();
+                    modeTempBuffer.buffer().clear();
+                    qDebug() << asciiValue;
+
+                    if(buffer.size() == 4 && asciiValue == "FAIL") {
+                        ui->cameraPerview->startStreaming();
+                        QMessageBox msgBox;
+                        msgBox.setText("failed to switch source failed, please try again. :(");
+                        msgBox.exec();
+                    } else if(buffer.size() == 4 && asciiValue == "DONE") {
+                        closeSerial();
+                        closeCamera();
+                        QMessageBox msgBox;
+                        msgBox.setText("switch source successed, please reconnect device");
+                        msgBox.exec();
+                    }
+
+                    break;
+                case SerialEvent::SET_DDEC:
+                    qDebug() << "get read: SET_DDEC";
+                    qDebug() << buffer.data();
+
+                    break;
+                case SerialEvent::SET_NUCP:
+                    qDebug() << "get read: SET_NUCP";
+                    qDebug() << buffer.data();
+                    break;
+                case SerialEvent::SET_BPCP:
+                    qDebug() << "get read: SET_BPCP";
+                    qDebug() << buffer.data();
+                    break;
+                case SerialEvent::SET_SUTS:
+                    qDebug() << "get read: SET_SUTS";
+                    qDebug() << buffer.data();
+
+                    if(currentCalibraMode == CalibrationStep::CAP_5) {
+                        currentCalibraMode = CalibrationStep::CAP_6;
+                        // next step
+                        if(captureMode == 4) {
+                            captureRoundSetting--;
+                            if (captureRoundSetting > 0)
+                                currentCalibraMode = CalibrationStep::CAP_2; // next round
+                        }
+                        else
+                            currentCalibraMode = CalibrationStep::CAP_7;
+                        checkCaptureFlag();
+                    } else if(currentCalibraMode == CalibrationStep::CAP_3 || currentCalibraMode == CalibrationStep::CAP_4){
+                        if(captureMode > 0) {
+                            captureDataSet();
+                        }
+                    }
+                    break;
+                case SerialEvent::SET_SUTC:
+                    qDebug() << "get read: SET_SUTC";
+                    qDebug() << buffer.data();
+
+                    if(currentCalibraMode == CalibrationStep::CAP_1) {
+                        currentCalibraMode = CalibrationStep::CAP_2;
+                        // next step
+                        checkCaptureFlag();
+                    } else if(currentCalibraMode == CalibrationStep::CAP_6) {
+                        currentCalibraMode = CalibrationStep::CAP_7;
+                        // next step
                         checkCaptureFlag();
                     }
+                    break;
+                case SerialEvent::SET_AGCM:
+                    qDebug() << "get read: SET_AGCM";
+                    qDebug() << buffer.data();
+
+                    break;
+                case SerialEvent::SET_GAIN:
+                    qDebug() << "get read: SET_GAIN";
+                    qDebug() << buffer.data();
+
+                    break;
+                case SerialEvent::SET_COLM:
+                    qDebug() << "get read: SET_COLM";
+                    qDebug() << buffer.data();
+
+                    break;
+                case SerialEvent::SET_FFCS:
+                    qDebug() << "get read: SET_FFCS";
+                    qDebug() << buffer.data();
+
+                    break;
+                case SerialEvent::SET_TPCC:
+                    qDebug() << "get read: SET_TPCC";
+                    qDebug() << buffer.data();
+                    break;
+                default:
+                    break;
                 }
-                break;
-            case SerialEvent::GET_DGFD:
-                qDebug() << "get read: GET_DGFD";
-                unitSize = 2;
-
-                if(buffer.size() >= unitSize) {
-                    QByteArray unit = buffer.left(unitSize);
-                    buffer.remove(0, unitSize);
-
-                    // Process the unit
-                    // Combine bytes: first byte is low, second byte is high
-                    value16 = static_cast<quint8>(unit[0]) | (static_cast<quint8>(unit[1]) << 8);
-
-                    qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
-                             << "Value:" << value16;
-                    deviceState->sensorDacGfid = value16;
-                }
-                break;
-            case SerialEvent::GET_DGSK:
-                qDebug() << "get read: GET_DGSK";
-                unitSize = 2;
-
-                if(buffer.size() >= unitSize) {
-                    QByteArray unit = buffer.left(unitSize);
-                    buffer.remove(0, unitSize);
-
-                    // Process the unit
-                    // Combine bytes: first byte is low, second byte is high
-                    value16 = static_cast<quint8>(unit[0]) | (static_cast<quint8>(unit[1]) << 8);
-
-                    qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
-                             << "Value:" << value16;
-                    deviceState->sensorDacGsk = value16;
-                }
-                if(autoProcessing) {
-                    autoAdjustNUC();
-                }
-                break;
-            case SerialEvent::GET_CINT:
-                qDebug() << "get read: GET_CINT";
-                unitSize = 1;
-
-                if(buffer.size() >= unitSize) {
-                    QByteArray unit = buffer.left(unitSize);
-                    buffer.remove(0, unitSize);
-
-                    // Process the unit
-                    // Combine bytes: first byte is low, second byte is high
-                    value16 = static_cast<quint8>(unit[0]);
-
-                    qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
-                             << "Value:" << value16;
-                    deviceState->sensorCint = value16;
-                }
-                break;
-            case SerialEvent::GET_TINT:
-                qDebug() << "get read: GET_TINT";
-                unitSize = 2;
-
-                if(buffer.size() >= unitSize) {
-                    QByteArray unit = buffer.left(unitSize);
-                    buffer.remove(0, unitSize);
-
-                    // Process the unit
-                    // Combine bytes: first byte is low, second byte is high
-                    value16 = static_cast<quint8>(unit[0]) | (static_cast<quint8>(unit[1]) << 8);
-
-                    qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
-                             << "Value:" << value16;
-                    deviceState->sensorTint = value16;
-                }
-                break;
-            case SerialEvent::GET_DDEC:
-                qDebug() << "get read: GET_DDEC";
-                unitSize = 1;
-
-                if(buffer.size() >= unitSize) {
-                    QByteArray unit = buffer.left(unitSize);
-                    buffer.remove(0, unitSize);
-
-                    // Process the unit
-                    // Combine bytes: first byte is low, second byte is high
-                    value16 = static_cast<quint8>(unit[0]);
-
-                    qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
-                             << "Value:" << value16;
-                    deviceState->ddeControl = value16 > 0;
-                }
-                break;
-            case SerialEvent::GET_VOMC:
-                qDebug() << "get read: GET_VOMC";
-                if( modeTempBuffer.size() + buffer.size() < 4) {
-                    qDebug() << "not enough data: "<< buffer.data();
-                    modeTempBuffer.setData(buffer);
-                    return;
-                }
-                asciiValue = modeTempBuffer.data() + buffer.data();
-                modeTempBuffer.buffer().clear();
-                qDebug() << asciiValue;
-                deviceState->sourceMode = QString::fromStdString(asciiValue);
-                updateCameraSource(QString::fromStdString(asciiValue));
-                break;
-            case SerialEvent::GET_SUTS:
-                qDebug() << "get read: GET_SUTS";
-                unitSize = 1;
-
-                if(buffer.size() >= unitSize) {
-                    QByteArray unit = buffer.left(unitSize);
-                    buffer.remove(0, unitSize);
-
-                    // Process the unit
-                    // Combine bytes: first byte is low, second byte is high
-                    value16 = static_cast<quint8>(unit[0]);
-
-                    qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
-                             << "Value:" << value16;
-                    deviceState->shutterControl= value16 > 0;
-                }
-                break;
-            case SerialEvent::GET_SUTC:
-                qDebug() << "get read: GET_SUTC";
-                unitSize = 1;
-
-                if(buffer.size() >= unitSize) {
-                    QByteArray unit = buffer.left(unitSize);
-                    buffer.remove(0, unitSize);
-
-                    // Process the unit
-                    // Combine bytes: first byte is low, second byte is high
-                    value16 = static_cast<quint8>(unit[0]);
-
-                    qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
-                             << "Value:" << value16;
-                    deviceState->autoShutterControl  = value16 > 0;
-                }
-                break;
-            case SerialEvent::GET_AGCM:
-                qDebug() << "get read: GET_AGCM";
-                unitSize = 2;
-
-                if(buffer.size() >= unitSize) {
-                    QByteArray unit = buffer.left(unitSize);
-                    buffer.remove(0, unitSize);
-
-                    // Process the unit
-                    // Combine bytes: first byte is low, second byte is high
-                    value16 = static_cast<quint8>(unit[0]) | (static_cast<quint8>(unit[1]) << 8);
-
-                    qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
-                             << "Value:" << value16;
-                    // check data in range
-                    if(value16 < 2)
-                        deviceState->agcMode = value16;
-                    else
-                        qDebug() << "get agc error, please try again. :(" ;
-                }
-                break;
-            case SerialEvent::GET_GAIN:
-                qDebug() << "get read: GET_GAIN";
-                unitSize = 1;
-
-                if(buffer.size() >= unitSize) {
-                    QByteArray unit = buffer.left(unitSize);
-                    buffer.remove(0, unitSize);
-
-                    // Process the unit
-                    // Combine bytes: first byte is low, second byte is high
-                    value16 = static_cast<quint8>(unit[0]);
-
-                    qDebug() << "Received "<< unitSize << "-byte unit:" << unit.toHex()
-                             << "Value:" << value16;
-                    // check data in range
-                    if(value16 < 4)
-                        deviceState->gainMode = value16;
-                    else
-                        qDebug() << "get gain error, please try again. :(";
-                }
-                break;
-            case SerialEvent::GET_MSNO:
-                qDebug() << "get read: GET_MSNO";
-                if( modeTempBuffer.size() + buffer.size() < 15) {
-                    qDebug() << "Thermal Device:" << "not enough data";
-                    modeTempBuffer.setData(buffer);
-                    eventRead->prepend(SerialEvent::GET_MSNO);
-                    return;
-                }
-                asciiValue = modeTempBuffer.data() + buffer.data();
-                modeTempBuffer.buffer().clear();
-                qDebug() << asciiValue;
-                deviceState->deviceNameSN = QString::fromStdString(asciiValue);
-                break;
-            case SerialEvent::SET_3DNR:
-                qDebug() << "get read: SET_3DNR";
-                qDebug() << buffer.data();
-
-                break;
-            case SerialEvent::SET_NUCC:
-                qDebug() << "get read: SET_NUCC";
-                qDebug() << buffer.data();
-
-                break;
-            case SerialEvent::SET_BPCC:
-                qDebug() << "get read: SET_BPCC";
-                qDebug() << buffer.data();
-
-                break;
-            case SerialEvent::SET_DGFD:
-                qDebug() << "get read: SET_DGFD";
-                qDebug() << buffer.data();
-
-                break;
-            case SerialEvent::SET_DGSK:
-                qDebug() << "get read: SET_DGSK";
-                qDebug() << buffer.data();
-
-                break;
-            case SerialEvent::SET_CINT:
-                qDebug() << "get read: SET_CINT";
-                qDebug() << buffer.data();
-
-                break;
-            case SerialEvent::SET_TINT:
-                qDebug() << "get read: SET_TINT";
-                qDebug() << buffer.data();
-
-                break;
-            case SerialEvent::SET_VOMC:
-                qDebug() << "get read: SET_VOMC";
-                qDebug() << buffer.data();
-                if( modeTempBuffer.size() + buffer.size() < 4) {
-                    qDebug() << "not enough data";
-                    modeTempBuffer.setData(buffer);
-                    return;
-                }
-                asciiValue = modeTempBuffer.data() + buffer.data();
-                modeTempBuffer.buffer().clear();
-                qDebug() << asciiValue;
-
-                if(buffer.size() == 4 && asciiValue == "FAIL") {
-                    ui->cameraPerview->startStreaming();
-                    QMessageBox msgBox;
-                    msgBox.setText("failed to switch source failed, please try again. :(");
-                    msgBox.exec();
-                } else if(buffer.size() == 4 && asciiValue == "DONE") {
-                    closeSerial();
-                    closeCamera();
-                    QMessageBox msgBox;
-                    msgBox.setText("switch source successed, please reconnect device");
-                    msgBox.exec();
-                }
-
-                break;
-            case SerialEvent::SET_DDEC:
-                qDebug() << "get read: SET_DDEC";
-                qDebug() << buffer.data();
-
-                break;
-            case SerialEvent::SET_NUCP:
-                qDebug() << "get read: SET_NUCP";
-                qDebug() << buffer.data();
-                break;
-            case SerialEvent::SET_BPCP:
-                qDebug() << "get read: SET_BPCP";
-                qDebug() << buffer.data();
-                break;
-            case SerialEvent::SET_SUTS:
-                qDebug() << "get read: SET_SUTS";
-                qDebug() << buffer.data();
-
-                if(currentCalibraMode == CalibrationStep::CAP_5) {
-                    currentCalibraMode = CalibrationStep::CAP_6;
-                    // next step
-                    if(captureMode == 4) {
-                        captureRoundSetting--;
-                        if (captureRoundSetting > 0)
-                            currentCalibraMode = CalibrationStep::CAP_2; // next round
-                    }
-                    else
-                        currentCalibraMode = CalibrationStep::CAP_7;
-                    checkCaptureFlag();
-                } else if(currentCalibraMode == CalibrationStep::CAP_3 || currentCalibraMode == CalibrationStep::CAP_4){
-                    if(captureMode > 0) {
-                        captureDataSet();
-                    }
-                }
-                break;
-            case SerialEvent::SET_SUTC:
-                qDebug() << "get read: SET_SUTC";
-                qDebug() << buffer.data();
-
-                if(currentCalibraMode == CalibrationStep::CAP_1) {
-                    currentCalibraMode = CalibrationStep::CAP_2;
-                    // next step
-                    checkCaptureFlag();
-                } else if(currentCalibraMode == CalibrationStep::CAP_6) {
-                    currentCalibraMode = CalibrationStep::CAP_7;
-                    // next step
-                    checkCaptureFlag();
-                }
-                break;
-            case SerialEvent::SET_AGCM:
-                qDebug() << "get read: SET_AGCM";
-                qDebug() << buffer.data();
-
-                break;
-            case SerialEvent::SET_GAIN:
-                qDebug() << "get read: SET_GAIN";
-                qDebug() << buffer.data();
-
-                break;
-            case SerialEvent::SET_COLM:
-                qDebug() << "get read: SET_COLM";
-                qDebug() << buffer.data();
-
-                break;
-            case SerialEvent::SET_FFCS:
-                qDebug() << "get read: SET_FFCS";
-                qDebug() << buffer.data();
-
-                break;
-            case SerialEvent::SET_TPCC:
-                qDebug() << "get read: SET_TPCC";
-                qDebug() << buffer.data();
-                break;
-            default:
-                break;
+            }
+            if(!eventRead->isEmpty()) {
+                eventRead->pop_front();
+                poolBuffer.clear();
             }
         }
-        if(!eventRead->isEmpty()) eventRead->pop_front();
         // historySerial.append("data read:");
         // historySerial.append(buffer.data());
     } else {
@@ -1309,6 +1400,14 @@ void MainWindow::handleReadyWrite() {
             if(eventRead != NULL) {
                 //qDebug() << "set read: GET_MSNO";
                 eventRead->append(SerialEvent::GET_MSNO);
+            }
+            break;
+        case SerialEvent::GET_PMOD:
+            data = buildCommand("PMOD", BuildCommandMode::GET, 0);
+            serial->write(data);
+            if(eventRead != NULL) {
+                //qDebug() << "Thermal Device:" << "set read: GET_PMOD";
+                eventRead->append(SerialEvent::GET_PMOD);
             }
             break;
         case SerialEvent::SET_3DNR:
@@ -1555,6 +1654,8 @@ void MainWindow::setSourceVideoMode(QString mode) {
 
 void MainWindow::getDeivceInfo() {
     startInitDeviceState = true;
+    // format
+    eventSend->append(SerialEvent::GET_PMOD);
 
     eventSend->append(SerialEvent::GET_SERIAL_NUMBER);
     // source video tyep
@@ -1927,7 +2028,7 @@ void MainWindow::checkResultPass(cv::Mat A, cv::Mat C) {
         true
         );
 
-    qDebug() << f.toStdString()
+    qDebug() << "C"
              << " => " << (ra.hasDefect ? "DEFECT" : "CLEAN")
              << " (components=" << ra.componentCount
              << ", brightThr=" << ra.brightThr
@@ -1950,7 +2051,7 @@ void MainWindow::checkResultPass(cv::Mat A, cv::Mat C) {
         false
         );
 
-    qDebug() << f.toStdString()
+    qDebug() << "A"
              << " => " << (r.hasDefect ? "DEFECT" : "CLEAN")
              << " (components=" << r.componentCount
              << ", brightThr=" << r.brightThr
